@@ -1,0 +1,35 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Secrets and local credentials (never commit)
+.env
+.env.*
+!.env.example
+credentails.txt
+credentials.txt
+*.pem
+*.key
+secrets/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs and local artifacts
+*.log
+agent-tools/

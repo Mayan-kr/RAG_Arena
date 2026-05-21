@@ -1,0 +1,324 @@
+================================================================================
+                         RAG ARENA — PROJECT GUIDE
+================================================================================
+
+RAG Arena is a benchmark web app that indexes the same technical document
+using two different RAG architectures and compares answers side-by-side.
+
+  Pipeline A — Vector RAG:  chunk text → embed → ChromaDB similarity search
+  Pipeline B — GraphRAG:    LLM extracts entities/relations → Neo4j graph
+  UI:                       Streamlit dashboard (app.py)
+  Evaluation (optional):    RAGAS metrics (faithfulness, relevancy, recall)
+
+
+================================================================================
+1. PROJECT STRUCTURE
+================================================================================
+
+RAG_Arena/
+│
+├── app.py                      # Streamlit UI — entry point to run the app
+├── requirements.txt            # Python dependencies
+├── guide.txt                   # This file
+├── .env                        # Optional local secrets (create yourself)
+├── .venv/                      # Virtual environment (after setup)
+│
+├── modules/
+│   ├── data_ingestion.py       # Loads files from dataset/
+│   ├── vector_pipeline.py      # Chroma in-memory vector index
+│   ├── graph_pipeline.py       # Neo4j PropertyGraphIndex
+│   └── evaluator.py            # RAGAS benchmark runner
+│
+├── dataset/
+│   └── system_specs.md         # Sample interconnected system documentation
+│
+└── .vscode/
+    └── settings.json           # Cursor/VS Code Python interpreter path
+
+
+================================================================================
+2. PREREQUISITES
+================================================================================
+
+  • Python 3.12 (recommended)
+  • Internet access (Groq API, HuggingFace model download, Neo4j Aura)
+  • Groq API key — https://console.groq.com/
+  • Neo4j Aura Free instance — https://neo4j.com/cloud/aura-free/
+        - Bolt URI  (e.g. neo4j+s://xxxxxxxx.databases.neo4j.io)
+        - Username  (usually neo4j)
+        - Password  (from Aura dashboard)
+
+  Do NOT commit API keys or passwords to git. Use the Streamlit sidebar or
+  a local .env file that is listed in .gitignore.
+
+
+================================================================================
+3. FIRST-TIME SETUP (WINDOWS — POWERSHELL)
+================================================================================
+
+--- 3.1 Go to project folder ---
+
+    cd d:\Projects\LLM\RAG_Arena
+
+
+--- 3.2 Create virtual environment (Python 3.12) ---
+
+    py -3.12 -m venv .venv
+
+
+--- 3.3 Activate virtual environment ---
+
+    .\.venv\Scripts\Activate.ps1
+
+    If you get an execution policy error:
+
+    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+    Then activate again:
+
+    .\.venv\Scripts\Activate.ps1
+
+    When active, your prompt shows (.venv).
+
+
+--- 3.4 Upgrade pip and install dependencies ---
+
+    python -m pip install --upgrade pip
+    python -m pip install -r requirements.txt
+
+    First install may take several minutes (downloads LlamaIndex, Chroma,
+    HuggingFace embedding model weights, etc.).
+
+
+--- 3.5 Verify installation ---
+
+    python -m pip check
+    python -c "import streamlit; import llama_index; print('OK')"
+
+
+--- 3.6 (Optional) Create .env for auto-filled sidebar fields ---
+
+    Create a file named .env in the project root:
+
+    GROQ_API_KEY=your_groq_key_here
+    NEO4J_URI=neo4j+s://your-instance.databases.neo4j.io
+    NEO4J_USERNAME=neo4j
+    NEO4J_PASSWORD=your_neo4j_password_here
+
+    app.py loads these via python-dotenv. You can still override them in the
+    Streamlit sidebar at runtime.
+
+
+================================================================================
+4. EVERYDAY COMMANDS (RUN THE APP)
+================================================================================
+
+--- 4.1 Open terminal and go to project ---
+
+    cd d:\Projects\LLM\RAG_Arena
+
+
+--- 4.2 Activate venv (required each new terminal session) ---
+
+    .\.venv\Scripts\Activate.ps1
+
+
+--- 4.3 Launch Streamlit ---
+
+    streamlit run app.py
+
+    Browser opens automatically (usually http://localhost:8501).
+    To stop the server: Ctrl+C in the terminal.
+
+
+--- 4.4 One-liner without activating venv (alternative) ---
+
+    d:\Projects\LLM\RAG_Arena\.venv\Scripts\python.exe -m streamlit run app.py
+
+
+--- 4.5 Deactivate venv when done ---
+
+    deactivate
+
+
+================================================================================
+5. CURSOR / VS CODE — PYTHON INTERPRETER
+================================================================================
+
+  The workspace is configured to use:
+
+    .venv\Scripts\python.exe
+
+  To pick it manually: Ctrl+Shift+P → "Python: Select Interpreter" →
+  choose ".venv (Python 3.12.x)".
+
+  Confirm system Python 3.12 path (optional):
+
+    py -3.12 -c "import sys; print(sys.executable)"
+
+
+================================================================================
+6. HOW THE APPLICATION WORKS (END-TO-END FLOW)
+================================================================================
+
+Step 1 — User opens app (streamlit run app.py)
+
+Step 2 — Sidebar collects credentials
+         • Groq API key (required)
+         • Neo4j Bolt URI, username, password (required for GraphRAG)
+         • Optional: question text and "Run full RAGAS benchmark" checkbox
+
+Step 3 — Guardrails
+         If Groq key or Neo4j credentials are missing, the app stops with a
+         warning and does not build indexes.
+
+Step 4 — Model initialization (cached after first run)
+         • Embeddings: BAAI/bge-small-en-v1.5 (HuggingFace, runs locally)
+         • LLM: Groq llama-3.3-70b-versatile (cloud API)
+
+Step 5 — Data ingestion (modules/data_ingestion.py)
+         Reads all files under dataset/ (currently system_specs.md) into
+         LlamaIndex Document objects. Both pipelines use the SAME documents.
+
+Step 6 — Pipeline A — Vector RAG (modules/vector_pipeline.py)
+         • Splits documents into chunks (512 chars, 50 overlap)
+         • Embeds chunks with BGE-small
+         • Stores vectors in ChromaDB EphemeralClient (in RAM only)
+         • Query: top-3 similar chunks → LLM generates answer
+
+Step 7 — Pipeline B — GraphRAG (modules/graph_pipeline.py)
+         • Sends documents to Groq LLM to extract entities and relationships
+         • Writes property graph to Neo4j Aura
+         • Query: graph traversal + vector similarity on graph nodes
+
+         NOTE: First GraphRAG build is SLOW (many LLM calls for extraction).
+         Streamlit caches engines until you restart or clear cache.
+
+Step 8 — Query mode (default)
+         User question is sent to BOTH engines.
+         Two columns show:
+           - Vector RAG answer + latency (seconds)
+           - GraphRAG answer + latency (seconds)
+
+Step 9 — Benchmark mode (sidebar checkbox enabled)
+         modules/evaluator.py runs 4 fixed questions with known ground truths,
+         scores both pipelines with RAGAS, and shows:
+           - Bar chart (faithfulness, answer relevancy, context recall)
+           - Table of per-question latencies
+
+
+================================================================================
+7. USING THE STREAMLIT UI
+================================================================================
+
+  1. Enter Groq API key in sidebar (password field).
+  2. Enter Neo4j Aura connection details.
+  3. Wait for spinners: embedding model → vector index → graph index.
+  4. Type a question or use the default.
+  5. View side-by-side results and latency.
+
+  Full benchmark:
+  • Check "Run full RAGAS benchmark (4 questions)"
+  • Wait longer (8 API queries + RAGAS scoring)
+  • Scroll down for charts and latency table
+
+  Clear Streamlit cache (if indexes behave oddly after code changes):
+  • Streamlit menu (⋮) → Clear cache → Rerun
+
+
+================================================================================
+8. KEY FILES AND RESPONSIBILITIES
+================================================================================
+
+  app.py
+    Orchestrates UI, credentials, caching, and calls both pipelines.
+
+  modules/data_ingestion.py
+    SimpleDirectoryReader → list of Documents from dataset/.
+
+  modules/vector_pipeline.py
+    SentenceSplitter → ChromaVectorStore → VectorStoreIndex → query engine.
+
+  modules/graph_pipeline.py
+    Neo4jGraphStore → PropertyGraphIndex.from_documents → query engine.
+
+  modules/evaluator.py
+    Paired queries, RAGAS evaluate(), default Q&A pairs for benchmark.
+
+  dataset/system_specs.md
+    Fictional "NexusGrid" platform spec with cross-linked services and
+    evaluation facts (heartbeat timeout, SLAs, etc.).
+
+
+================================================================================
+9. EXTERNAL SERVICES & COST NOTES
+================================================================================
+
+  Groq API
+    Used for: GraphRAG entity extraction, answer generation, RAGAS judging.
+    Consumes API quota; watch rate limits on free tier.
+
+  HuggingFace (BGE-small embeddings)
+    Downloaded once on first run; runs on your CPU/GPU locally.
+
+  Neo4j Aura
+    Graph data persists in your cloud instance until you delete it.
+    Re-running GraphRAG may add/update graph data in the same database.
+
+  ChromaDB (Ephemeral)
+    Vector index lives only in process memory — gone when app stops.
+
+
+================================================================================
+10. TROUBLESHOOTING
+================================================================================
+
+  "Enter your Groq API key"
+    → Add key in sidebar or .env GROQ_API_KEY=
+
+  "Enter Neo4j Aura Bolt URI..."
+    → Use neo4j+s:// URI from Aura, not http:// browser URL
+
+  Neo4j connection errors
+    → Confirm instance is running, password is correct, IP allowlist if any
+
+  Slow first startup
+    → Normal: embedding download + graph extraction LLM calls
+
+  RAGAS evaluation failed
+    → Check Groq quota; ensure both pipelines returned answers
+
+  ModuleNotFoundError
+    → Activate .venv and run: pip install -r requirements.txt
+
+  Wrong Python version
+    → py -3.12 -m venv .venv  (recreate venv) then reinstall requirements
+
+
+================================================================================
+11. QUICK COMMAND REFERENCE
+================================================================================
+
+  # Setup (once)
+  cd d:\Projects\LLM\RAG_Arena
+  py -3.12 -m venv .venv
+  .\.venv\Scripts\Activate.ps1
+  python -m pip install -r requirements.txt
+
+  # Run app (every session)
+  cd d:\Projects\LLM\RAG_Arena
+  .\.venv\Scripts\Activate.ps1
+  streamlit run app.py
+
+  # Run without activating venv
+  .\.venv\Scripts\python.exe -m streamlit run app.py
+
+  # Leave venv
+  deactivate
+
+  # Reinstall deps after requirements.txt changes
+  pip install -r requirements.txt
+
+================================================================================
+                              END OF GUIDE
+================================================================================
