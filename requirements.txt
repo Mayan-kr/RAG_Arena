@@ -37,3 +37,4 @@ neo4j==5.28.4
 python-dotenv==1.2.2
 matplotlib==3.10.9
 pandas==2.3.3
+protobuf==6.33.6
