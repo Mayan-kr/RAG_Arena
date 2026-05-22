@@ -5,11 +5,12 @@
 ### Vector RAG vs GraphRAG — Side-by-Side Benchmark
 
 [![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Streamlit](https://img.shields.io/badge/Streamlit-1.35+-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io)
-[![LlamaIndex](https://img.shields.io/badge/LlamaIndex-0.10+-8B5CF6?logo=data:image/svg+xml;base64,&logoColor=white)](https://llamaindex.ai)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.57+-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io)
+[![LlamaIndex](https://img.shields.io/badge/LlamaIndex-0.14+-8B5CF6?logo=data:image/svg+xml;base64,&logoColor=white)](https://llamaindex.ai)
 [![Groq](https://img.shields.io/badge/Groq-LLama_3.3_70B-F55036?logo=groq&logoColor=white)](https://groq.com)
 [![Neo4j](https://img.shields.io/badge/Neo4j-Aura-4581C3?logo=neo4j&logoColor=white)](https://neo4j.com/cloud/aura/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://rag-arena.streamlit.app)
 
 *A zero-local-weight benchmark app that indexes the same document using two different RAG architectures and lets you compare their answers — powered by Groq, ChromaDB, and Neo4j Aura.*
 
@@ -148,13 +149,13 @@ The app will open in your browser at `http://localhost:8501`.
 
 ### Step-by-Step Flow
 
-1. **Launch** — Open the app and enter your API credentials in the sidebar
-2. **Ingest** — The app loads the source document (`dataset/system_specs.md`) using LlamaIndex
-3. **Index** — Both pipelines index the same document simultaneously (first run takes longer for GraphRAG due to LLM entity extraction)
-4. **Query** — Type a question in the sidebar and hit enter
+1. **Launch** — Open the app and enter your Groq API key in the sidebar (Neo4j is pre-configured on the live demo)
+2. **Ingest** — The app loads all documents from `dataset/` using LlamaIndex `SimpleDirectoryReader`
+3. **Index** — Vector RAG chunks and embeds into ChromaDB (in-memory). GraphRAG loads from existing Neo4j nodes instantly — LLM extraction only runs when Neo4j is empty
+4. **Query** — Type a question in the sidebar and hit Enter
 5. **Retrieve & Generate** — Each pipeline retrieves relevant context and generates an answer via Groq
 6. **Display** — Answers appear side-by-side with response latency
-7. **Benchmark** *(optional)* — Enable the benchmark checkbox to run RAGAS evaluation suites
+7. **Benchmark** *(optional)* — Click **▶ Run full RAGAS benchmark** to run a 4-question evaluation suite
 
 ---
 
@@ -226,7 +227,7 @@ RAG_Arena/
 │   └── evaluator.py              # 📊 RAGAS benchmark runner + fallback scoring
 │
 ├── dataset/
-│   └── system_specs.md           # 📋 Sample document (NexusGrid Platform spec)
+│   └── *.md / *.txt / *.pdf      # 📋 Your documents go here (NexusGrid sample included)
 │
 ├── guide.txt                     # 📘 Detailed operational guide
 └── PROJECT_HURDLES_LOG.md        # 📝 Development log & solutions
@@ -290,7 +291,34 @@ RAG_Arena/
 - **Test relationships** — Ask multi-hop questions (e.g., *"How does a deployment flow from commit to production?"*) to see where GraphRAG shines
 - **Run all suites** — Use the benchmark dropdown to compare across different question types
 - **Watch the latency** — Vector RAG is typically faster; GraphRAG trades speed for deeper reasoning
-- **Swap the document** — Replace `dataset/system_specs.md` with your own document to benchmark on your data
+- **Groq quota** — The free tier gives 100K tokens/day. RAGAS uses ~2K tokens per question judged; regular queries use ~500–1K tokens each
+
+---
+
+## 📂 Use Your Own Dataset
+
+If you cloned this repo, you can benchmark on **any document set** in 3 steps:
+
+### 1. Replace the dataset
+```bash
+# Remove the sample NexusGrid files
+rm dataset/*
+
+# Add your own documents (supports .md, .txt, .pdf, .docx)
+cp /path/to/your/docs/*.pdf dataset/
+```
+
+### 2. Clear the Neo4j graph
+In [Neo4j Aura console](https://console.neo4j.io), run this Cypher query to wipe the old graph:
+```cypher
+MATCH (n) DETACH DELETE n
+```
+This forces GraphRAG to re-extract entities from your new documents on the next run.
+
+### 3. Update the benchmark questions *(optional)*
+In [`modules/evaluator.py`](modules/evaluator.py), edit `BENCHMARK_SUITES` to add questions and ground truths that match your new document content.
+
+> **💡 Tip:** Vector RAG re-indexes automatically on every restart (ChromaDB is in-memory). Neo4j re-indexes only when the graph is empty — the app detects this automatically.
 
 ---
 
