@@ -27,6 +27,15 @@ from modules.vector_pipeline import build_vector_rag
 
 load_dotenv()
 
+def get_secret(key: str, default: str = "") -> str:
+    """Read from st.secrets first (Streamlit Cloud), then os.environ (local)."""
+    try:
+        if key in st.secrets:
+            return st.secrets[key]
+    except Exception:
+        pass
+    return os.getenv(key, default)
+
 
 def infer_aura_database(uri: str, username: str) -> str:
     """
@@ -46,9 +55,9 @@ def infer_aura_database(uri: str, username: str) -> str:
     return "neo4j"
 
 
-_default_uri = os.getenv("NEO4J_URI", "")
-_default_user = os.getenv("NEO4J_USERNAME", "")
-_default_db = os.getenv("NEO4J_DATABASE") or infer_aura_database(_default_uri, _default_user)
+_default_uri = get_secret("NEO4J_URI", "")
+_default_user = get_secret("NEO4J_USERNAME", "")
+_default_db = get_secret("NEO4J_DATABASE") or infer_aura_database(_default_uri, _default_user)
 
 st.set_page_config(page_title="RAG Arena", layout="wide")
 st.title("RAG Arena: Vector RAG vs GraphRAG")
@@ -61,7 +70,7 @@ with st.sidebar:
         "Groq API Key",
         type="password",
         placeholder="gsk_...",
-        value=os.getenv("GROQ_API_KEY", ""),
+        value=get_secret("GROQ_API_KEY", ""),
     )
     st.caption(
         "Free key at [console.groq.com](https://console.groq.com) — "
@@ -70,16 +79,16 @@ with st.sidebar:
 
     # Neo4j is pre-configured — visitors don't normally need to change this.
     with st.expander("⚙️ Neo4j connection (pre-configured)", expanded=False):
-        neo4j_uri = st.text_input("Bolt URI", value=os.getenv("NEO4J_URI", ""))
+        neo4j_uri = st.text_input("Bolt URI", value=get_secret("NEO4J_URI", ""))
         neo4j_user = st.text_input(
             "Username",
-            value=os.getenv("NEO4J_USERNAME", ""),
+            value=get_secret("NEO4J_USERNAME", ""),
             help="Aura often uses your instance id (e.g. c288b90b), not the literal word neo4j.",
         )
         neo4j_password = st.text_input(
             "Password",
             type="password",
-            value=os.getenv("NEO4J_PASSWORD", ""),
+            value=get_secret("NEO4J_PASSWORD", ""),
         )
         neo4j_database = st.text_input(
             "Database name",
