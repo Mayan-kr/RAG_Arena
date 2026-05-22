@@ -56,54 +56,77 @@ st.caption("Zero-local-weight benchmark — Groq + Chroma (memory) + Neo4j Aura"
 
 # --- Sidebar: secrets & connection (never hardcoded) ---
 with st.sidebar:
-    st.header("Credentials & Connections")
+    st.header("🔑 Your Groq API Key")
     groq_key = st.text_input(
         "Groq API Key",
         type="password",
+        placeholder="gsk_...",
         value=os.getenv("GROQ_API_KEY", ""),
     )
-
-    st.subheader("Neo4j Aura (GraphRAG)")
-    neo4j_uri = st.text_input("Bolt URI", value=os.getenv("NEO4J_URI", ""))
-    neo4j_user = st.text_input(
-        "Username",
-        value=os.getenv("NEO4J_USERNAME", ""),
-        help="Aura often uses your instance id (e.g. c288b90b), not the literal word neo4j.",
-    )
-    neo4j_password = st.text_input(
-        "Password",
-        type="password",
-        value=os.getenv("NEO4J_PASSWORD", ""),
-    )
-    neo4j_database = st.text_input(
-        "Database name",
-        value=_default_db,
-        help="Use NEO4J_DATABASE from Aura. For many Aura instances this matches "
-        "your instance id (same as username), e.g. c288b90b — not 'neo4j'.",
+    st.caption(
+        "Free key at [console.groq.com](https://console.groq.com) — "
+        "no credit card required. Free tier: 100K tokens/day."
     )
 
+    # Neo4j is pre-configured — visitors don't normally need to change this.
+    with st.expander("⚙️ Neo4j connection (pre-configured)", expanded=False):
+        neo4j_uri = st.text_input("Bolt URI", value=os.getenv("NEO4J_URI", ""))
+        neo4j_user = st.text_input(
+            "Username",
+            value=os.getenv("NEO4J_USERNAME", ""),
+            help="Aura often uses your instance id (e.g. c288b90b), not the literal word neo4j.",
+        )
+        neo4j_password = st.text_input(
+            "Password",
+            type="password",
+            value=os.getenv("NEO4J_PASSWORD", ""),
+        )
+        neo4j_database = st.text_input(
+            "Database name",
+            value=_default_db,
+            help="Matches your Aura instance id, e.g. c288b90b.",
+        )
+
+    st.divider()
     st.subheader("Query")
     user_question = st.text_area(
         "Question",
         value="What triggers automatic deploy rollback on NexusGrid?",
         height=100,
     )
-    run_benchmark = st.checkbox("Run full RAGAS benchmark (4 questions)", value=False)
+    st.subheader("Benchmark")
     benchmark_suite_name = st.selectbox(
         "Benchmark suite",
         options=list(BENCHMARK_SUITES.keys()),
         index=0,
     )
+    run_benchmark = st.button("▶ Run full RAGAS benchmark")
+    if st.button("✕ Clear benchmark results"):
+        if "eval_result" in st.session_state:
+            del st.session_state["eval_result"]
+            st.rerun()
+
 
 # --- Guardrails: halt until required inputs exist ---
 if not groq_key:
-    st.warning("Enter your Groq API key in the sidebar.")
+    st.info(
+        "### 👋 Welcome to RAG Arena!\n\n"
+        "This app compares **Vector RAG** vs **GraphRAG** side-by-side on the same document.\n\n"
+        "**To get started:**\n"
+        "1. Get a free Groq API key at [console.groq.com](https://console.groq.com) "
+        "(no credit card, takes 30 seconds)\n"
+        "2. Paste it into **🔑 Your Groq API Key** in the sidebar\n"
+        "3. Ask any question and hit **Enter**"
+    )
     st.stop()
 
 neo4j_ok = bool(neo4j_uri and neo4j_user and neo4j_password and neo4j_database)
 
 if not neo4j_ok:
-    st.warning("Enter Neo4j Aura Bolt URI, username, and password to build GraphRAG.")
+    st.warning(
+        "Neo4j connection details are missing. "
+        "Expand the **⚙️ Neo4j connection** panel in the sidebar and fill in your Aura credentials."
+    )
     st.stop()
 
 
@@ -116,7 +139,7 @@ def get_embed_model():
 def get_llm(api_key: str):
     from llama_index.llms.groq import Groq
 
-    return Groq(model="llama-3.3-70b-versatile", api_key=api_key)
+    return Groq(model="llama-3.3-70b-versatile", api_key=api_key, max_retries=1)
 
 
 @st.cache_resource(show_spinner="Indexing Vector RAG (Chroma in-memory)...")
@@ -230,64 +253,81 @@ if "eval_result" in st.session_state:
 
     if v_scores and g_scores:
         metrics = sorted(set(v_scores) & set(g_scores))
-        vector_avg_quality = sum(v_scores[m] for m in metrics) / len(metrics)
-        graph_avg_quality = sum(g_scores[m] for m in metrics) / len(metrics)
-        vector_avg_latency = sum(r["latency_s"] for r in ev["vector"]) / len(ev["vector"])
-        graph_avg_latency = sum(r["latency_s"] for r in ev["graph"]) / len(ev["graph"])
-        quality_delta = vector_avg_quality - graph_avg_quality
-        latency_delta = graph_avg_latency - vector_avg_latency
-        quality_winner = "Tie" if abs(quality_delta) < 0.03 else (
-            "Vector RAG" if quality_delta > 0 else "GraphRAG"
-        )
-        latency_winner = "Tie" if abs(latency_delta) < 0.1 else (
-            "Vector RAG" if latency_delta > 0 else "GraphRAG"
-        )
-        # Weighted score: prioritize quality, then latency.
-        vector_overall = (0.7 * vector_avg_quality) + (
-            0.3 * (1.0 / (1.0 + vector_avg_latency))
-        )
-        graph_overall = (0.7 * graph_avg_quality) + (
-            0.3 * (1.0 / (1.0 + graph_avg_latency))
-        )
-        overall_delta = vector_overall - graph_overall
-        overall_winner = "Tie" if abs(overall_delta) < 0.03 else (
-            "Vector RAG" if overall_delta > 0 else "GraphRAG"
-        )
-
-        w1, w2, w3 = st.columns(3)
-        with w1:
-            st.metric(
-                "Quality Winner",
-                quality_winner,
-                delta=f"V:{vector_avg_quality:.3f} | G:{graph_avg_quality:.3f}",
+        if metrics:
+            vector_avg_quality = sum(v_scores[m] for m in metrics) / len(metrics)
+            graph_avg_quality = sum(g_scores[m] for m in metrics) / len(metrics)
+            vector_avg_latency = sum(r["latency_s"] for r in ev["vector"]) / len(ev["vector"])
+            graph_avg_latency = sum(r["latency_s"] for r in ev["graph"]) / len(ev["graph"])
+            quality_delta = vector_avg_quality - graph_avg_quality
+            latency_delta = graph_avg_latency - vector_avg_latency
+            quality_winner = "Tie" if abs(quality_delta) < 0.03 else (
+                "Vector RAG" if quality_delta > 0 else "GraphRAG"
             )
-        with w2:
-            st.metric(
-                "Latency Winner",
-                latency_winner,
-                delta=f"V:{vector_avg_latency:.3f}s | G:{graph_avg_latency:.3f}s",
+            latency_winner = "Tie" if abs(latency_delta) < 0.1 else (
+                "Vector RAG" if latency_delta > 0 else "GraphRAG"
             )
-        with w3:
-            st.metric(
-                "Overall Winner",
-                overall_winner,
-                delta=f"V:{vector_overall:.3f} | G:{graph_overall:.3f}",
+            # Weighted score: prioritize quality, then latency.
+            vector_overall = (0.7 * vector_avg_quality) + (
+                0.3 * (1.0 / (1.0 + vector_avg_latency))
+            )
+            graph_overall = (0.7 * graph_avg_quality) + (
+                0.3 * (1.0 / (1.0 + graph_avg_latency))
+            )
+            overall_delta = vector_overall - graph_overall
+            overall_winner = "Tie" if abs(overall_delta) < 0.03 else (
+                "Vector RAG" if overall_delta > 0 else "GraphRAG"
             )
 
-        x = range(len(metrics))
-        width = 0.35
+            w1, w2, w3 = st.columns(3)
+            with w1:
+                st.metric(
+                    "Quality Winner",
+                    quality_winner,
+                    delta=f"V:{vector_avg_quality:.3f} | G:{graph_avg_quality:.3f}",
+                )
+            with w2:
+                st.metric(
+                    "Latency Winner",
+                    latency_winner,
+                    delta=f"V:{vector_avg_latency:.3f}s | G:{graph_avg_latency:.3f}s",
+                )
+            with w3:
+                st.metric(
+                    "Overall Winner",
+                    overall_winner,
+                    delta=f"V:{vector_overall:.3f} | G:{graph_overall:.3f}",
+                )
 
-        fig, ax = plt.subplots(figsize=(8, 4))
-        ax.bar([i - width / 2 for i in x], [v_scores[m] for m in metrics], width, label="Vector RAG")
-        ax.bar([i + width / 2 for i in x], [g_scores[m] for m in metrics], width, label="GraphRAG")
-        ax.set_xticks(list(x))
-        ax.set_xticklabels(metrics, rotation=15, ha="right")
-        ax.set_ylabel("Score")
-        ax.set_title(" / ".join(metrics))
-        ax.legend()
-        ax.set_ylim(0, 1.05)
-        fig.tight_layout()
-        st.pyplot(fig)
+            x = range(len(metrics))
+            width = 0.35
+
+            _RAGAS_METRICS = {"faithfulness", "answer_relevancy", "context_recall"}
+            _ragas_present   = [m for m in metrics if m in _RAGAS_METRICS]
+            _fallback_present = [m for m in metrics if m not in _RAGAS_METRICS]
+            _title_parts: list[str] = []
+            if _ragas_present:
+                _title_parts.append("RAGAS: " + ", ".join(_ragas_present))
+            if _fallback_present:
+                _title_parts.append("Fallback: " + ", ".join(_fallback_present))
+            chart_title = "\n".join(_title_parts) if _title_parts else "Benchmark Metrics"
+
+            fig, ax = plt.subplots(figsize=(9, 4))
+            ax.bar([i - width / 2 for i in x], [v_scores[m] for m in metrics], width, label="Vector RAG", color="#4C9BE8")
+            ax.bar([i + width / 2 for i in x], [g_scores[m] for m in metrics], width, label="GraphRAG", color="#F4913A")
+            ax.set_xticks(list(x))
+            ax.set_xticklabels(
+                [m.replace("_", " ").title() for m in metrics],
+                rotation=20, ha="right", fontsize=9,
+            )
+            ax.set_ylabel("Score")
+            ax.set_title(chart_title, fontsize=10, loc="left", pad=8)
+            ax.legend()
+            ax.set_ylim(0, 1.05)
+            fig.tight_layout()
+            st.pyplot(fig)
+        else:
+            st.warning("No overlapping evaluation metrics found between Vector RAG and GraphRAG.")
+
 
         latency_df = pd.DataFrame(
             {

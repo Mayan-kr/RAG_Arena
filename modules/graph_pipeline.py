@@ -28,11 +28,25 @@ def build_graph_rag(
         refresh_schema=False,
     )
 
-    index = PropertyGraphIndex.from_documents(
-        documents,
-        property_graph_store=graph_store,
-        llm=llm,
-        embed_model=embed_model,
-        show_progress=True,
-    )
+    try:
+        existing = graph_store.structured_query("MATCH (n) RETURN count(n) AS count")
+        has_data = existing and existing[0].get("count", 0) > 0
+    except Exception:
+        has_data = False
+
+    if has_data:
+        index = PropertyGraphIndex.from_existing(
+            property_graph_store=graph_store,
+            llm=llm,
+            embed_model=embed_model,
+        )
+    else:
+        index = PropertyGraphIndex.from_documents(
+            documents,
+            property_graph_store=graph_store,
+            llm=llm,
+            embed_model=embed_model,
+            show_progress=True,
+        )
     return index.as_query_engine()
+

@@ -10,6 +10,13 @@ from datasets import Dataset
 from ragas import evaluate
 from ragas.metrics import answer_relevancy, context_recall, faithfulness
 
+import os
+from openai import OpenAI
+from ragas.llms import llm_factory
+from ragas.embeddings import LlamaIndexEmbeddingsWrapper
+from llama_index.core.llms import LLM as LlamaIndexLLM
+from llama_index.core.embeddings import BaseEmbedding as LlamaIndexEmbedding
+
 
 def _extract_answer(response: Any) -> str:
     return str(getattr(response, "response", response))
@@ -192,6 +199,15 @@ def run_comparative_evaluation(
             warnings.append("Rate limit reached during benchmark; results are partial.")
             break
 
+    if llm is not None and isinstance(llm, LlamaIndexLLM):
+        api_key = getattr(llm, "api_key", os.environ.get("GROQ_API_KEY", ""))
+        model_name = getattr(llm, "model", "llama-3.3-70b-versatile")
+        groq_client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=api_key, max_retries=1)
+        llm = llm_factory(model_name, client=groq_client, temperature=0.4)
+
+    if embed_model is not None and isinstance(embed_model, LlamaIndexEmbedding):
+        embed_model = LlamaIndexEmbeddingsWrapper(embeddings=embed_model)
+
     metrics = [faithfulness, answer_relevancy, context_recall]
     eval_kwargs: dict[str, Any] = {}
     if llm is not None:
@@ -216,6 +232,8 @@ def _run_ragas(rows: list[dict], metrics, eval_kwargs: dict) -> dict[str, float]
     if not valid_rows:
         return {}
 
+    fallback = _fallback_scores(valid_rows)
+
     dataset = Dataset.from_dict(
         {
             "question": [r["question"] for r in valid_rows],
@@ -235,14 +253,15 @@ def _run_ragas(rows: list[dict], metrics, eval_kwargs: dict) -> dict[str, float]
             if not numeric_df[col].dropna().empty
         }
         if not clean_scores:
-            fallback = _fallback_scores(valid_rows)
             fallback["ragas_warning"] = "RAGAS returned no numeric metric values (all NaN/empty)."
             return fallback
-        return clean_scores
+        
+        fallback.update(clean_scores)
+        return fallback
     except Exception as exc:
-        fallback = _fallback_scores(valid_rows)
         fallback["ragas_warning"] = f"RAGAS failed: {exc}"
         return fallback
+
 
 
 BENCHMARK_SUITES: dict[str, dict[str, list[str]]] = {

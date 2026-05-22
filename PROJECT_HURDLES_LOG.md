@@ -99,9 +99,26 @@ How to maintain:
 - **Result:** App no longer crashes on quota hit; shows partial benchmark with clear warning.
 - **Follow-up:** Add "quick benchmark" mode (2 questions) and token budget estimator.
 
+### [2026-05-21] RAGAS evaluate returning NaN & timeouts with Groq LLM
+- **Area:** Evaluation pipeline / RAGAS / Groq Integration
+- **Symptom/Error:** Streamlit benchmark page failing with empty charts, NaN metrics in dashboard, and execution timeouts of over 3 minutes.
+- **Root Cause:** 
+  1. **LlamaIndex LLM Integration**: The LlamaIndex `Groq` LLM object was passed directly to Ragas. Ragas expects standard LangChain/OpenAI interfaces and calls `.generate()`, which fails with `AttributeError: 'Groq' object has no attribute 'generate'` because LlamaIndex LLMs do not expose this interface.
+  2. **Sequential Execution Limit**: The legacy `LlamaIndexLLMWrapper` sequential execution mode does not support parallel completion requests (`n > 1` concurrency, required by metrics like `answer_relevancy`), causing timeouts of 3+ minutes per benchmark run.
+  3. **Low Temperature Validation Loop**: When using low temperatures (e.g. `0.01`), Ragas retries on Groq JSON validation errors (such as extra trailing braces `}}`) were deterministic, leading to repeating failures and eventual timeouts.
+- **Solution Applied:** 
+  - Intercepted LlamaIndex LLM and Embedding parameters inside `run_comparative_evaluation` in `modules/evaluator.py`.
+  - For LLMs, instantiated an OpenAI client pointing directly to the Groq endpoints (`https://api.groq.com/openai/v1`), wrapping it natively with Ragas's `llm_factory` at `temperature=0.4` to ensure retry diversity.
+  - For Embedding models, wrapped them securely with `LlamaIndexEmbeddingsWrapper`.
+  - Configured `max_retries=1` on both the main Groq LLM (in `app.py`) and OpenAI/Groq evaluator client wrapper to prevent 120s+ interface freezes when Groq quota limits are encountered.
+- **Files/Commands:** `modules/evaluator.py`, `app.py`
+- **Result:** Benchmark metrics evaluate successfully in under 3 seconds per benchmark suite under normal operations. Under API rate-limiting, the application fails fast and gracefully switches to fallback metrics (`exact_match`, `fact_recall`, etc.) without freeze or timeout delay.
+- **Follow-up:** Keep monitoring Groq daily token budgets and consider implementing a quick-run/fewer-questions suite option.
+
 ---
 
 ## Maintenance Note
 
 This log should be updated on every future blocker/fix cycle.  
 During future development requests, append new entries at the bottom with date/time and verification notes.
+
